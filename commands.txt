@@ -1,0 +1,7 @@
+upload_file /home/ganesh/Documents/AOS/2024201030_A3/sample1.jpeg 1
+
+upload_file /home/ganesh/Documents/AOS/2024201030_A3/sample4.jpeg 1
+
+download_file 1 sample1.jpeg /home/ganesh/Documents/AOS/2024201030_A3/downloads
+
+download_file 1 sample4.jpeg /home/ganesh/Documents/AOS/2024201030_A3/downloads
