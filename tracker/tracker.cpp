@@ -37,7 +37,7 @@ struct groupInfo
     unordered_set<string> members;
     unordered_set<string> requests;
     // File Name: Sha
-    unordered_map<string, string> filePaths;
+    unordered_map<string, string> getFileSha;
     // To get the file path
     // Sha: Filepath
     unordered_map<string, string> getPath;
@@ -678,7 +678,7 @@ void *handleClientRequest(void *args)
                     }
 
                     groupInfo *group = groups[groupNumber];
-                    if (group->filePaths.find(path) != group->filePaths.end())
+                    if (group->getFileSha.find(path) != group->getFileSha.end())
                     {
                         cout << "File " << path << " is already part of this group...\n";
                         string response = "File is already part of this group.\n";
@@ -711,9 +711,9 @@ void *handleClientRequest(void *args)
                         torrent[fileSha].push_back(parts[i]);
                     }
 
-                    cout << "File's path\n";
+                    cout << "File's Sha\n";
                     cout << fileSha << "\n";
-                    cout << "Chunk sha:\n";
+                    cout << "Chunk Sha:\n";
                     for (auto it : torrent[fileSha])
                     {
                         cout << it << "\n";
@@ -725,10 +725,10 @@ void *handleClientRequest(void *args)
                     {
                         fileName = path.substr(lastSlashPos + 1);
                     }
-                    group->filePaths.insert({fileName, fileSha});
+                    group->getFileSha.insert({fileName, fileSha});
                     group->getPath.insert({fileSha, path});
 
-                    for (auto it : group->filePaths)
+                    for (auto it : group->getFileSha)
                     {
                         cout << it.first << " = " << it.second << "\n";
                     }
@@ -791,12 +791,12 @@ void *handleClientRequest(void *args)
                 {
                     // Check if this file is present in group or not
                     groupInfo *group = groups[groupNumber];
-                    // for (auto it : group->filePaths)
+                    // for (auto it : group->getFileSha)
                     // {
                     //     cout << it.first << " = " << it.second << "\n";
                     // }
 
-                    if (group->filePaths.find(fileName) == group->filePaths.end())
+                    if (group->getFileSha.find(fileName) == group->getFileSha.end())
                     {
                         cout << "Requested file is not part of this group...\n";
                         string response = "File not part of this group.\n";
@@ -805,7 +805,7 @@ void *handleClientRequest(void *args)
                     else
                     {
                         cout << "Requested file is part of this group...\n";
-                        string fileSha = group->filePaths[fileName];
+                        string fileSha = group->getFileSha[fileName];
                         // for (auto chunkSha : torrent[fileSha])
                         // {
                         //     for (auto user : userChunks[chunkSha])
@@ -930,7 +930,7 @@ void *handleClientRequest(void *args)
             {
                 cout << "All files of group " << groupNumber << " were displayed.\n";
                 string response = "Files list:\n";
-                for (auto it : groups[groupNumber]->filePaths)
+                for (auto it : groups[groupNumber]->getFileSha)
                 {
                     response += it.first;
                     response += "\n";

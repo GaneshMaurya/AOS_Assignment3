@@ -50,6 +50,40 @@ string sha1ToHexString(const unsigned char sha1Hash[SHA_DIGEST_LENGTH])
     return ss.str();
 }
 
+string calculateFileSHA1(const string &filePath)
+{
+    const int bufferSize = 8 * 1024;
+    unsigned char buffer[bufferSize];
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA_CTX shaContext;
+
+    SHA1_Init(&shaContext);
+
+    int fileDescriptor = open(filePath.c_str(), O_RDONLY);
+    if (fileDescriptor < 0)
+    {
+        cerr << "Error opening file: " << filePath << endl;
+        return "";
+    }
+
+    ssize_t bytesRead;
+    while ((bytesRead = read(fileDescriptor, buffer, bufferSize)) > 0)
+    {
+        SHA1_Update(&shaContext, buffer, bytesRead);
+    }
+
+    SHA1_Final(hash, &shaContext);
+    close(fileDescriptor);
+
+    stringstream ss;
+    for (int i = 0; i < SHA_DIGEST_LENGTH; ++i)
+    {
+        ss << hex << setw(2) << setfill('0') << static_cast<int>(hash[i]);
+    }
+
+    return ss.str();
+}
+
 void *handleListen(void *args)
 {
     ThreadArgs *threadArgs = (ThreadArgs *)args;
@@ -83,7 +117,7 @@ void *handleListen(void *args)
             if (valread > 0)
             {
                 cout << "Message received:\n";
-                cout << message << "\n";
+                // cout << message << "\n";
                 string str(message);
 
                 if (str.substr(0, 8) == "Download")
@@ -94,8 +128,8 @@ void *handleListen(void *args)
                     getline(ss, chunkNumberStr, ':');
                     getline(ss, filePath, ':');
                     getline(ss, chunkHash);
-                    int chunkNumber = stoi(chunkNumberStr);
 
+                    int chunkNumber = stoi(chunkNumberStr);
                     cout << "Client wants " << chunkNumber << " chunk from " << filePath << " file\n";
 
                     int inputFile = open(filePath.c_str(), O_RDONLY);
@@ -112,6 +146,7 @@ void *handleListen(void *args)
                         cout << "Error seeking to chunk: " << chunkNumber << "\n";
                         close(inputFile);
                         delete[] fileChunk;
+                        continue;
                     }
 
                     // Read the nth chunk
@@ -121,10 +156,21 @@ void *handleListen(void *args)
                         cout << "Error reading file: " << filePath << "\n";
                         close(inputFile);
                         delete[] fileChunk;
+                        continue;
                     }
 
                     cout << "Chunk " << chunkNumber << " sent to requested client...\n";
-                    send(newSocketFd, fileChunk, strlen(fileChunk), 0);
+                    cout << "Chunk size: " << bytesRead << "\n";
+
+                    if (send(newSocketFd, fileChunk, bytesRead, 0) < 0)
+                    {
+                        cout << "Error: Failed to send message to peer.\n";
+                        close(newSocketFd);
+                        delete[] fileChunk;
+                        close(inputFile);
+                        continue;
+                    }
+
                     close(inputFile);
                     delete[] fileChunk;
                 }
@@ -177,7 +223,9 @@ void handleDownloads(const string &response, const string &newFileName, const st
     string filePath, fileSha, chunkShaBlock, chunkShaWithNumber, chunkSha, userBlock;
 
     getline(ss, filePath, ':');
+    // cout << "File Path to download = " << filePath << "\n";
     getline(ss, fileSha, ':');
+    // cout << "File Sha of the above = " << fileSha << "\n";
 
     while (getline(ss, chunkShaBlock, '&'))
     {
@@ -222,8 +270,24 @@ void handleDownloads(const string &response, const string &newFileName, const st
     }
 
     // Sort chunks by number of clients (rarest first)
+    // sort(chunkList.begin(), chunkList.end(), [](const auto &a, const auto &b)
+    //      { return a.second.second.size() < b.second.second.size(); });
+
+    // Sort based on chunk number
     sort(chunkList.begin(), chunkList.end(), [](const auto &a, const auto &b)
-         { return a.second.second.size() < b.second.second.size(); });
+         { return a.second.first < b.second.first; });
+
+    struct stat fileStat;
+    string tempPath = filePath;
+    if (stat(tempPath.c_str(), &fileStat) == -1)
+    {
+        cout << "Stat error\n";
+    }
+    int fileSize = fileStat.st_size;
+    cout << "File path = " << filePath << "\n";
+    cout << "File Size calculated during download " << fileSize << "\n";
+
+    int sizeReceived = 0;
 
     // Iterate over sorted chunks and request from clients
     for (const auto &chunkEntry : chunkList)
@@ -300,297 +364,144 @@ void handleDownloads(const string &response, const string &newFileName, const st
 
         cout << "Message sent to peer for chunk " << chunkNumber << ".\n";
 
-        char *fileChunk = new char[CHUNK_SIZE];
-        int valread = recv(fd, fileChunk, CHUNK_SIZE, 0);
-        if (valread <= 0)
+        // size_t bytesRead = 0;
+        // string receivedData = "";
+        // size_t bytesRemaining = min(CHUNK_SIZE, fileSize - (chunkNumber * CHUNK_SIZE));
+
+        // while (bytesRead < bytesRemaining)
+        // {
+        //     char *chunkSubPiece = new char[bytesRemaining];
+        //     int valread = recv(fd, chunkSubPiece, bytesRemaining - bytesRead, 0);
+        //     if (valread < 0)
+        //     {
+        //         cout << "Error: Failed to receive chunk data.\n";
+        //         delete[] chunkSubPiece;
+        //         close(fd);
+        //         break;
+        //     }
+        //     else if (valread == 0)
+        //     {
+        //         cout << "Connection closed by peer.\n";
+        //         delete[] chunkSubPiece;
+        //         close(fd);
+        //         break;
+        //     }
+
+        //     receivedData.append(chunkSubPiece, valread);
+        //     bytesRead += valread;
+        //     delete[] chunkSubPiece;
+
+        //     if (bytesRead >= bytesRemaining)
+        //     {
+        //         break;
+        //     }
+        // }
+
+        // sizeReceived += bytesRead;
+
+        // char *fileChunk = new char[bytesRead];
+        // memcpy(fileChunk, receivedData.c_str(), bytesRead);
+
+        // // Write chunk data to file
+        // off_t offset = chunkNumber * CHUNK_SIZE;
+
+        // if (lseek(fileDescriptor, offset, SEEK_SET) == -1)
+        // {
+        //     cout << "Error seeking to position " << offset << " for chunk " << chunkNumber << ".\n";
+        //     delete[] fileChunk;
+        //     return;
+        // }
+
+        // ssize_t bytesWritten = write(fileDescriptor, fileChunk, bytesRead);
+        // if (bytesWritten != bytesRead)
+        // {
+        //     cout << "Error writing chunk " << chunkNumber << " to the file.\n";
+        //     delete[] fileChunk;
+        //     return;
+        // }
+
+        size_t bytesRead = 0;
+        vector<char> receivedData;
+        receivedData.reserve(CHUNK_SIZE);
+        size_t bytesRemaining = min(CHUNK_SIZE, fileSize - (chunkNumber * CHUNK_SIZE));
+
+        char *chunkSubPiece = new char[CHUNK_SIZE];
+
+        while (bytesRead < bytesRemaining)
         {
-            cout << "Error: Failed to receive chunk data for chunk " << chunkNumber << ".\n";
-            delete[] fileChunk;
-            close(fd);
-            continue;
+            int valread = recv(fd, chunkSubPiece, bytesRemaining - bytesRead, 0);
+            if (valread < 0)
+            {
+                cout << "Error: Failed to receive chunk data.\n";
+                delete[] chunkSubPiece;
+                close(fd);
+                return;
+            }
+            else if (valread == 0)
+            {
+                cout << "Connection closed by peer.\n";
+                delete[] chunkSubPiece;
+                close(fd);
+                return;
+            }
+
+            receivedData.insert(receivedData.end(), chunkSubPiece, chunkSubPiece + valread);
+            bytesRead += valread;
+
+            if (bytesRead >= bytesRemaining)
+            {
+                break;
+            }
         }
 
-        // Write chunk data to file
-        off_t offset = chunkNumber * CHUNK_SIZE;
+        delete[] chunkSubPiece;
 
+        off_t offset = chunkNumber * CHUNK_SIZE;
         if (lseek(fileDescriptor, offset, SEEK_SET) == -1)
         {
             cout << "Error seeking to position " << offset << " for chunk " << chunkNumber << ".\n";
-            return;
+            continue;
         }
 
-        ssize_t bytesWritten = write(fileDescriptor, fileChunk, valread);
-        if (bytesWritten != valread)
+        ssize_t bytesWritten = write(fileDescriptor, receivedData.data(), bytesRead);
+        if (bytesWritten != bytesRead)
         {
             cout << "Error writing chunk " << chunkNumber << " to the file.\n";
-            return;
+            continue;
         }
 
-        cout << "Successfully wrote chunk " << chunkNumber << " of size " << valread << " bytes.\n";
+        cout << "Successfully wrote chunk " << chunkNumber << " of size " << bytesWritten << " bytes.\n";
 
-        delete[] message;
-        delete[] fileChunk;
+        // delete[] fileChunk;
         close(fd);
     }
 
     close(fileDescriptor);
 
-    // Now check the file SHA integrity after download
-    fileDescriptor = open(newFilePath.c_str(), O_RDONLY);
-    if (fileDescriptor < 0)
+    int newFileFd = open(newFilePath.c_str(), O_RDONLY);
+    if (newFileFd < 0)
     {
         cout << "Error opening file for SHA calculation.\n";
         return;
     }
+    cout << "Expected Size " << fileSize << "\n";
+    cout << "Received Size " << sizeReceived << "\n";
 
-    unsigned char fileShaTemp[SHA_DIGEST_LENGTH];
-    char *buffer = new char[BUFFER_SIZE];
-    string fullFile;
-    ssize_t bytesRead;
-    while ((bytesRead = read(fileDescriptor, buffer, BUFFER_SIZE)) > 0)
-    {
-        fullFile.append(buffer, bytesRead);
-    }
-    delete[] buffer;
-
-    const unsigned char *totalFile = stringToUnsignedChar(fullFile);
-    SHA1(totalFile, fullFile.length(), fileShaTemp);
-    string receivedSha = sha1ToHexString(fileShaTemp);
-
+    string receivedSha = calculateFileSHA1(newFilePath);
     cout << "Expected SHA: " << fileSha << "\n";
     cout << "Received SHA: " << receivedSha << "\n";
 
     if (fileSha == receivedSha)
     {
-        cout << "Download completed successfully, and SHA matches!\n";
+        cout << "Download completed successfully!\n";
     }
     else
     {
         cout << "SHA mismatch! Download corrupted.\n";
     }
 
-    close(fileDescriptor);
+    close(newFileFd);
 }
-
-// void handleDownloads(const string &response, const string &newFileName, const string &folderPath)
-// {
-//     string newFilePath = folderPath + "/" + newFileName;
-//     int fileDescriptor = open(newFilePath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-//     if (fileDescriptor < 0)
-//     {
-//         cout << "Error creating file at: " << newFilePath << "\n";
-//         return;
-//     }
-
-//     unordered_map<string, unordered_map<string, pair<int, vector<UserDetails>>>> parsedData;
-
-//     stringstream ss(response);
-//     string filePath, fileSha, chunkShaBlock, chunkShaWithNumber, chunkSha, userBlock;
-
-//     getline(ss, filePath, ':');
-//     getline(ss, fileSha, ':');
-
-//     while (getline(ss, chunkShaBlock, '&'))
-//     {
-//         stringstream chunkStream(chunkShaBlock);
-//         if (getline(chunkStream, chunkShaWithNumber, ':') && !chunkShaWithNumber.empty())
-//         {
-//             stringstream chunkShaStream(chunkShaWithNumber);
-//             getline(chunkShaStream, chunkSha, ',');
-//             string chunkNumberStr;
-//             getline(chunkShaStream, chunkNumberStr, ',');
-//             int chunkNumber = stoi(chunkNumberStr);
-
-//             vector<UserDetails> userInfo;
-//             string userBlock;
-
-//             while (getline(chunkStream, userBlock, ':'))
-//             {
-//                 stringstream userStream(userBlock);
-//                 string user, ip, port;
-
-//                 getline(userStream, user, ';');
-//                 getline(userStream, ip, ';');
-//                 getline(userStream, port, ';');
-
-//                 if (!user.empty() && !ip.empty() && !port.empty())
-//                 {
-//                     UserDetails userDetails = {ip, port};
-//                     userInfo.push_back(userDetails);
-//                 }
-//             }
-
-//             parsedData[fileSha][chunkSha] = {chunkNumber, userInfo};
-//         }
-//     }
-
-//     // Collect all chunks with their client counts
-//     vector<pair<string, pair<int, vector<UserDetails>>>> chunkList;
-
-//     for (const auto &chunk : parsedData[fileSha])
-//     {
-//         chunkList.push_back({chunk.first, chunk.second}); // chunk.first is the chunkSHA, chunk.second is pair<int, vector<UserDetails>>
-//     }
-
-//     // Sort chunks by the number of clients (rarest first)
-//     sort(chunkList.begin(), chunkList.end(), [](const auto &a, const auto &b)
-//          { return a.second.second.size() < b.second.second.size(); });
-
-//     // Iterate over sorted chunks and request from clients
-//     for (const auto &chunkEntry : chunkList)
-//     {
-//         const string &chunkHash = chunkEntry.first;
-//         const int chunkNumber = chunkEntry.second.first;
-//         const vector<UserDetails> &users = chunkEntry.second.second;
-
-//         // If no clients are available, continue to the next chunk
-//         if (users.empty())
-//         {
-//             cout << "No clients available for chunk " << chunkHash << ".\n";
-//             continue;
-//         }
-
-//         // Randomly select a client from the available users
-//         int randomIndex = rand() % users.size();
-//         string userIp = users[randomIndex].ipaddress;
-//         string port = users[randomIndex].port;
-
-//         // Prepare to connect to the selected user
-//         string chunkNumberStr = to_string(chunkNumber);
-
-//         // New socket to connect with the selected client
-//         struct sockaddr_in seederData;
-//         socklen_t clientAddrLen = sizeof(seederData);
-//         seederData.sin_family = AF_INET;
-//         in_addr_t ipInBinary = inet_addr(userIp.c_str());
-//         seederData.sin_addr.s_addr = ipInBinary;
-//         uint16_t PORT = static_cast<uint16_t>(strtoul(port.c_str(), NULL, 10));
-//         seederData.sin_port = htons(PORT);
-
-//         int fd = socket(AF_INET, SOCK_STREAM, 0);
-//         if (fd == -1)
-//         {
-//             cout << "An error occurred in creating socket\n";
-//             continue;
-//         }
-
-//         int opt = 1;
-//         if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
-//         {
-//             cout << "Error: Sockopt\n";
-//             close(fd);
-//             continue;
-//         }
-
-//         int status = connect(fd, (struct sockaddr *)&seederData, sizeof(seederData));
-//         if (status == -1)
-//         {
-//             cout << "Failed to connect to peer for chunk " << chunkHash << ".\n";
-//             close(fd);
-//             continue;
-//         }
-
-//         string temp = "Download:";
-//         temp += chunkNumberStr;
-//         temp += ":";
-//         temp += filePath;
-//         temp += ":";
-//         temp += chunkHash;
-
-//         char *message = new char[BUFFER_SIZE];
-//         strcpy(message, temp.c_str());
-//         if (send(fd, message, strlen(message), 0) < 0)
-//         {
-//             cout << "Error: Failed to send message to server.\n";
-//         }
-
-//         char *fileChunk = new char[CHUNK_SIZE];
-//         int valread = recv(fd, fileChunk, BUFFER_SIZE - 1, 0);
-//         if (valread <= 0)
-//         {
-//             delete[] fileChunk;
-//             close(fd);
-//             continue;
-//         }
-
-//         // off_t offset = chunkNumber * CHUNK_SIZE;
-
-//         // if (lseek(fileDescriptor, offset, SEEK_SET) < 0)
-//         // {
-//         //     cout << "Error seeking in file\n";
-//         //     continue;
-//         // }
-
-//         // if (write(fileDescriptor, fileChunk, bytesRead) != bytesRead)
-//         // {
-//         //     cout << "Error writing chunk to file\n";
-//         //     continue;
-//         // }
-
-//         int bytesRead;
-//         if (bytesRead > 0)
-//         {
-//             off_t offset = chunkNumber * CHUNK_SIZE;
-
-//             if (lseek(fileDescriptor, offset, SEEK_SET) == -1)
-//             {
-//                 cout << "Error seeking to position " << offset << " for chunk " << chunkNumber << ".\n";
-//                 return;
-//             }
-
-//             ssize_t bytesWritten = write(fileDescriptor, fileChunk, bytesRead);
-//             if (bytesWritten != bytesRead)
-//             {
-//                 cout << "Error writing chunk " << chunkNumber << " to the file.\n";
-//                 return;
-//             }
-//             cout << "Successfully wrote chunk " << chunkNumber << " of size " << bytesRead << " bytes to the file.\n";
-//         }
-
-//         unsigned char chunkShaTemp[SHA_DIGEST_LENGTH];
-//         string str(fileChunk);
-//         const unsigned char *PATH = stringToUnsignedChar(str);
-//         SHA1(PATH, str.length(), chunkShaTemp);
-
-//         string receivedSha = sha1ToHexString(chunkShaTemp);
-//         cout << chunkHash << "\n";
-//         cout << receivedSha << "\n";
-//         if (chunkHash == receivedSha)
-//         {
-//             cout << "Successful transfer of chunk " << chunkHash << ".\n";
-//         }
-
-//         // Remove the chunk from parsed data after processing
-//         parsedData[fileSha].erase(chunkHash);
-
-//         // Clean up
-//         delete[] message;
-//         delete[] fileChunk;
-//         close(fd);
-//     }
-
-//     string fullFile;
-//     ssize_t bytesRead;
-//     char *buffer = new char[BUFFER_SIZE];
-//     while ((bytesRead = read(fileDescriptor, buffer, sizeof(buffer) - 1)) > 0)
-//     {
-//         buffer[bytesRead] = '\0';
-//         fullFile += buffer;
-//     }
-
-//     unsigned char fileShaTemp[SHA_DIGEST_LENGTH];
-//     const unsigned char *totalFile = stringToUnsignedChar(fullFile);
-//     SHA1(totalFile, sizeof(totalFile) - 1, fileShaTemp);
-//     string receivedSha = sha1ToHexString(fileShaTemp);
-
-//     cout << fileSha << "\n";
-//     cout << receivedSha << "\n";
-
-//     if (fileSha == receivedSha)
-//     {
-//         cout << "Download completed...\n";
-//     }
-// }
 
 int main(int argc, char *argv[])
 {
@@ -741,21 +652,7 @@ int main(int argc, char *argv[])
                 pthread_mutex_unlock(&filesMutex);
                 continue;
             }
-
-            string fullFile;
-            ssize_t bytesRead;
-            char buffer[BUFFER_SIZE];
-
-            while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0)
-            {
-                fullFile.append(buffer, bytesRead);
-            }
-            close(fd);
-
-            unsigned char fileShaTemp[SHA_DIGEST_LENGTH];
-            const unsigned char *totalFile = reinterpret_cast<const unsigned char *>(fullFile.c_str());
-            SHA1(totalFile, fullFile.size(), fileShaTemp);
-            string fileSha = sha1ToHexString(fileShaTemp);
+            string fileSha = calculateFileSHA1(path);
 
             encodedHash += fileSha + '&';
             fileHash[fileSha] = path;
@@ -764,6 +661,7 @@ int main(int argc, char *argv[])
             stat(path.c_str(), &fileInfo);
             int fileSize = fileInfo.st_size;
             int numChunks = (fileSize + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            // cout << "File Size calculated during upload " << fileSize << "\n";
 
             int inputFile = open(path.c_str(), O_RDONLY);
             if (inputFile < 0)
@@ -807,8 +705,8 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            cout << "Data sent to tracker\n"
-                 << encodedHash << "\n";
+            // cout << "Data sent to tracker\n"
+            //      << encodedHash << "\n";
 
             char responseMessage[BUFFER_SIZE];
             memset(responseMessage, 0, BUFFER_SIZE);
@@ -845,6 +743,7 @@ int main(int argc, char *argv[])
             int valread = recv(clientToTrackerSocketFd, responseMessage, BUFFER_SIZE - 1, 0);
             if (valread > 0)
             {
+                // cout << "Response from tracker : " << responseMessage << "\n";
                 handleDownloads(responseMessage, newFileName, savePath);
             }
             else if (valread == 0)
