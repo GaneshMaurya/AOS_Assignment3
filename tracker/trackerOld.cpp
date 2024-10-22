@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 using namespace std;
 
-int BUFFER_SIZE = 64 * 1024;
+int BUFFER_SIZE = 1024;
 int LISTEN_BACKLOG = 10;
 int opt = 1;
 int CHUNK_SIZE = 512 * 1024;
@@ -28,8 +28,6 @@ struct userInfo
     int socketFd;
     // Paths
     unordered_set<string> filesOwned;
-    // File Names and group id
-    unordered_map<string, int> filesDownloaded;
 };
 
 struct groupInfo
@@ -126,8 +124,8 @@ void *handleClientRequest(void *args)
         // Correction
         memset(clientMessage, 0, BUFFER_SIZE);
 
-        int valueRead = recv(socketFd, clientMessage, BUFFER_SIZE - 1, 0);
-        if (valueRead <= 0)
+        int valread = recv(socketFd, clientMessage, BUFFER_SIZE - 1, 0);
+        if (valread <= 0)
         {
             delete[] clientMessage;
             delete threadArgs;
@@ -178,48 +176,30 @@ void *handleClientRequest(void *args)
         if (commands[0] == "logout")
         {
             pthread_mutex_lock(&activeUsersMutex);
-            pthread_mutex_lock(&userChunksMutex);
 
             if (currUser != NULL && currUser->active == true)
             {
                 currUser->active = false;
                 activeUsers.erase(currUser->userId);
 
-                for (const string &chunk : currUser->filesOwned)
-                {
-                    vector<string> &users = userChunks[chunk];
-
-                    auto it = find(users.begin(), users.end(), currUser->userId);
-                    if (it != users.end())
-                    {
-                        users.erase(it);
-                    }
-
-                    if (users.empty())
-                    {
-                        userChunks.erase(chunk);
-                    }
-                }
-
-                cout << "User " << currUser->userId << " logged out successfully.\n\n";
+                cout << "User " << currUser->userId << " logged out successfully.\n";
                 string response = "User logged out successfully.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
             else
             {
-                cout << "Logout Failed...\n\n";
+                cout << "Logout Failed...\n";
                 string response = "User needs to logged in first in order to logout.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
 
             pthread_mutex_unlock(&activeUsersMutex);
-            pthread_mutex_unlock(&userChunksMutex);
         }
         else if (commands[0] == "create_user")
         {
             if (commands.size() < 3)
             {
-                string response = "Invalid create_user command.\n\n";
+                string response = "Invalid create_user command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -232,7 +212,7 @@ void *handleClientRequest(void *args)
             if (userDetails.find(user_id) != userDetails.end())
             {
                 // Write code to send this back to client. And let client display this message
-                cout << "User with the same user id " << user_id << " already exists...\n\n";
+                cout << "User with the same user id " << user_id << " already exists...\n";
                 string response = "User Id already exists.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -245,7 +225,7 @@ void *handleClientRequest(void *args)
                 newUser->port = clientPort;
 
                 userDetails[user_id] = newUser;
-                cout << "User " + user_id + " created successfully.\n\n";
+                cout << "User " + user_id + " created successfully.\n";
 
                 string response = "User created successfully...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
@@ -257,7 +237,7 @@ void *handleClientRequest(void *args)
         {
             if (commands.size() < 3)
             {
-                string response = "Invalid login command.\n\n";
+                string response = "Invalid login command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -267,11 +247,10 @@ void *handleClientRequest(void *args)
 
             pthread_mutex_lock(&userDetailsMutex);
             pthread_mutex_lock(&activeUsersMutex);
-            pthread_mutex_lock(&userChunksMutex);
 
             if (userDetails.find(user_id) == userDetails.end())
             {
-                cout << "No such user with this user id exists..\n\n";
+                cout << "No such user with this user id exists..\n";
                 string response = "No such user with this user id exists. Please retry with new credentials...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -279,7 +258,7 @@ void *handleClientRequest(void *args)
             {
                 if (currUser->userId != user_id)
                 {
-                    cout << "Login Unsuccessful...\n\n";
+                    cout << "Login Unsuccessful...\n";
                     string response = "Login Unsuccessful. Already logged in with another user...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
@@ -291,7 +270,7 @@ void *handleClientRequest(void *args)
             }
             else if (activeUsers.find(user_id) != activeUsers.end())
             {
-                cout << "User " << user_id << " already logged in...\n\n";
+                cout << "User " << user_id << " already logged in...\n";
                 string response = "User already logged in.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -304,24 +283,13 @@ void *handleClientRequest(void *args)
                     currUser->socketFd = socketFd;
                     activeUsers.insert(user_id);
                     userDetails[user_id] = currUser;
-
-                    for (const string &chunk : currUser->filesOwned)
-                    {
-                        vector<string> &users = userChunks[chunk];
-
-                        if (find(users.begin(), users.end(), currUser->userId) == users.end())
-                        {
-                            users.push_back(currUser->userId);
-                        }
-                    }
-
-                    cout << "User with userId " + user_id + " is successfully logged in...\n\n";
+                    cout << "User with userId " + user_id + " is successfully logged in...\n";
                     string response = "Login Successful...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
                 else
                 {
-                    cout << "Login Unsuccessful...\n\n";
+                    cout << "Login Unsuccessful...\n";
                     string response = "Login Unsuccessful. Please retry with correct credentials...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
@@ -329,7 +297,6 @@ void *handleClientRequest(void *args)
 
             pthread_mutex_unlock(&userDetailsMutex);
             pthread_mutex_unlock(&activeUsersMutex);
-            pthread_mutex_unlock(&userChunksMutex);
         }
         else if (commands[0] == "create_group")
         {
@@ -352,7 +319,7 @@ void *handleClientRequest(void *args)
                 // If group number already exists
                 if (groups.find(groupNumber) != groups.end())
                 {
-                    cout << "Group " << temp << " already exists...\n\n";
+                    cout << "Group " << temp << " already exists...\n";
                     string response = "Group already exists. Try creating a different group...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
@@ -370,14 +337,14 @@ void *handleClientRequest(void *args)
                     groups[groupNumber] = newGroup;
                     groupOwners[groupNumber] = currUser;
 
-                    cout << "Group " << groupNumber << " created successfully by " << currUser->userId << "...\n\n";
+                    cout << "Group " << groupNumber << " created successfully...\n";
                     string response = "Group created successfully...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -390,7 +357,7 @@ void *handleClientRequest(void *args)
         {
             if (commands.size() < 2)
             {
-                string response = "Invalid join_group command.\n\n";
+                string response = "Invalid join_group command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -405,7 +372,7 @@ void *handleClientRequest(void *args)
 
                 if (groups.find(groupNumber) == groups.end())
                 {
-                    cout << "User tried to join a group that doesn't exist...\n\n";
+                    cout << "User tried to join a group that doesn't exist...\n";
                     string response = "No such group exists...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
@@ -415,14 +382,14 @@ void *handleClientRequest(void *args)
 
                     if (group->members.find(currUser->userId) != group->members.end())
                     {
-                        cout << "User attempted to join a group which he is already a part of...\n\n";
+                        cout << "User attempted to join a group which he is already a part of...\n";
                         string response = "You are already a member...\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                     }
                     else
                     {
                         group->requests.insert(currUser->userId);
-                        cout << "Request to join " << groupNumber << " created...\n\n";
+                        cout << "Request to join " << groupNumber << " created...\n";
                         string response = "Request to join sent to group owner...\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                     }
@@ -432,7 +399,7 @@ void *handleClientRequest(void *args)
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -444,7 +411,7 @@ void *handleClientRequest(void *args)
         {
             if (commands.size() < 2)
             {
-                string response = "Invalid leave_group command.\n\n";
+                string response = "Invalid leave_group command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -489,7 +456,7 @@ void *handleClientRequest(void *args)
                                 userInfo *newOwnerUser = userDetails[newOwner];
                                 newOwnerUser->groupOwner.insert(groupNumber);
 
-                                cout << "New owner of group " << groupNumber << " is now " << newOwner << ".\n\n";
+                                cout << "New owner of group " << groupNumber << " is now " << newOwner << ".\n";
 
                                 groups[groupNumber] = currGroup;
                                 groupOwners[groupNumber] = newOwnerUser;
@@ -498,56 +465,14 @@ void *handleClientRequest(void *args)
                             // If the owner was the only member
                             else
                             {
-                                cout << "No other members in group " << groupNumber << ". Deleting the group.\n\n";
+                                cout << "No other members in group " << groupNumber << ". Deleting the group.\n";
                                 groups.erase(groupNumber);
                                 groupOwners.erase(groupNumber);
                                 // delete currGroup;
                             }
 
-                            vector<string> filesToRemove;
-                            for (const string &filePath : currUser->filesOwned)
-                            {
-                                if (currUser->filesDownloaded[filePath] == groupNumber)
-                                {
-                                    vector<string> &users = userChunks[filePath];
-                                    auto it = find(users.begin(), users.end(), currUser->userId);
-                                    if (it != users.end())
-                                    {
-                                        users.erase(it);
-                                    }
-
-                                    if (users.empty())
-                                    {
-                                        userChunks.erase(filePath);
-                                    }
-
-                                    filesToRemove.push_back(filePath);
-                                }
-                            }
-
-                            for (const string &filePath : filesToRemove)
-                            {
-                                currUser->filesOwned.erase(filePath);
-                                currUser->filesDownloaded.erase(filePath);
-                            }
-
-                            vector<string> downloadedFilesToRemove;
-                            for (const auto &entry : currUser->filesDownloaded)
-                            {
-                                if (entry.second == groupNumber)
-                                {
-                                    downloadedFilesToRemove.push_back(entry.first);
-                                }
-                            }
-
-                            for (const string &filePath : downloadedFilesToRemove)
-                            {
-                                currUser->filesDownloaded.erase(filePath);
-                            }
-
                             currUser->groupOwner.erase(groupNumber);
                             userDetails[currUser->userId] = currUser;
-                            groups[groupNumber] = currGroup;
 
                             string response = "You have left group " + temp + ".\n";
                             send(socketFd, response.c_str(), response.length(), 0);
@@ -563,20 +488,20 @@ void *handleClientRequest(void *args)
                             string response = "You have left group " + temp + ".\n";
                             send(socketFd, response.c_str(), response.length(), 0);
 
-                            cout << "User " << currUser->userId << " has left group " << groupNumber << ".\n\n";
+                            cout << "User " << currUser->userId << " has left group " << groupNumber << ".\n";
                             groups[groupNumber] = currGroup;
                         }
                     }
                     else
                     {
-                        string response = "You are not a member of group " + temp + ".\n\n";
+                        string response = "You are not a member of group " + temp + ".\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                     }
                 }
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), strlen(response.c_str()), 0);
             }
@@ -592,7 +517,7 @@ void *handleClientRequest(void *args)
                 string temp = commands[1];
                 int groupNumber = stoi(temp);
 
-                cout << "Pending requests were displayed.\n\n";
+                cout << "Pending requests were displayed.\n";
 
                 string response = "Requests:\n";
                 groupInfo *currGroup = groups[groupNumber];
@@ -606,7 +531,7 @@ void *handleClientRequest(void *args)
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -615,7 +540,7 @@ void *handleClientRequest(void *args)
         {
             if (commands.size() < 3)
             {
-                string response = "Invalid accept_request command.\n\n";
+                string response = "Invalid accept_request command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -652,7 +577,7 @@ void *handleClientRequest(void *args)
                         userDetails[user_id]->groupId.insert(groupNumber);
 
                         cout << "Group owner " << currGroup->owner << " has accepted the request of " << user_id
-                             << " to join group " << groupNumber << "\n\n";
+                             << " to join group " << groupNumber << "\n";
 
                         groups[groupNumber] = currGroup;
                         // userInfo *reqUser = userDetails[user_id];
@@ -663,7 +588,7 @@ void *handleClientRequest(void *args)
                     }
                     else
                     {
-                        cout << "No join request from user " << user_id << " for group " << groupNumber << ".\n\n";
+                        cout << "No join request from user " << user_id << " for group " << groupNumber << ".\n";
                         string response = "No such join request exists for user " + user_id + ".\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                     }
@@ -677,7 +602,7 @@ void *handleClientRequest(void *args)
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), strlen(response.c_str()), 0);
             }
@@ -689,7 +614,7 @@ void *handleClientRequest(void *args)
         {
             if (currUser != NULL && currUser->active == true)
             {
-                cout << "All groups were displayed.\n\n";
+                cout << "All groups were displayed.\n";
 
                 string response = "Groups list:\n";
                 for (auto it : groups)
@@ -701,7 +626,7 @@ void *handleClientRequest(void *args)
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -710,7 +635,7 @@ void *handleClientRequest(void *args)
         {
             if (commands.size() < 4)
             {
-                string response = "Invalid upload_file command.\n\n";
+                string response = "Invalid upload_file command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -729,14 +654,14 @@ void *handleClientRequest(void *args)
                 // Check is group number is valid or not
                 if (groups.find(groupNumber) == groups.end())
                 {
-                    cout << "Invalid group number entered...\n\n";
+                    cout << "Invalid group number entered...\n";
                     string response = "Invalid group number entered. Please retry...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
                 // Checks if user is part of the group
                 else if (currUser->groupId.find(groupNumber) == currUser->groupId.end())
                 {
-                    cout << "User is not part of this group...\n\n";
+                    cout << "User is not part of this group...\n";
                     string response = "You are not part of this group.\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
@@ -746,7 +671,7 @@ void *handleClientRequest(void *args)
                     // Check if file is actually proper
                     if (filePresent(path) == false)
                     {
-                        cout << "File mentioned by client doesn't exist...\n\n";
+                        cout << "File mentioned by client doesn't exist...\n";
                         string response = "No such file exists.\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                         continue;
@@ -755,7 +680,7 @@ void *handleClientRequest(void *args)
                     groupInfo *group = groups[groupNumber];
                     if (group->getFileSha.find(path) != group->getFileSha.end())
                     {
-                        cout << "File " << path << " is already part of this group...\n\n";
+                        cout << "File " << path << " is already part of this group...\n";
                         string response = "File is already part of this group.\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                         continue;
@@ -786,13 +711,13 @@ void *handleClientRequest(void *args)
                         torrent[fileSha].push_back(parts[i]);
                     }
 
-                    // cout << "File's Sha: ";
-                    // cout << fileSha << "\n";
-                    // cout << "Chunk Sha:\n";
-                    // for (auto it : torrent[fileSha])
-                    // {
-                    //     cout << it << "\n";
-                    // }
+                    cout << "File's Sha\n";
+                    cout << fileSha << "\n";
+                    cout << "Chunk Sha:\n";
+                    for (auto it : torrent[fileSha])
+                    {
+                        cout << it << "\n";
+                    }
 
                     size_t lastSlashPos = path.find_last_of('/');
                     string fileName;
@@ -813,7 +738,7 @@ void *handleClientRequest(void *args)
                         userChunks[parts[i]].push_back(currUser->userId);
                     }
 
-                    cout << "File " << fileName << " successfully uploaded...\n\n";
+                    cout << "File " << fileName << " successfully uploaded...\n";
                     string response = "Done uploading...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
 
@@ -822,7 +747,7 @@ void *handleClientRequest(void *args)
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -834,9 +759,9 @@ void *handleClientRequest(void *args)
         }
         else if (commands[0] == "download_file")
         {
-            if (commands.size() < 4)
+            if (commands.size() != 4)
             {
-                string response = "Invalid download_file command.\n\n";
+                string response = "Invalid upload_file command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
@@ -854,15 +779,15 @@ void *handleClientRequest(void *args)
                 // Check is group number is valid or not
                 if (groups.find(groupNumber) == groups.end())
                 {
-                    cout << "Invalid group number entered...\n\n";
-                    string response = "Invalid group number entered. Please retry.";
+                    cout << "Invalid group number entered...\n";
+                    string response = "Invalid group number entered. Please retry...\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
                 // Checks if user is part of the group
                 else if (currUser->groupId.find(groupNumber) == currUser->groupId.end())
                 {
-                    cout << "User is not part of this group...\n\n";
-                    string response = "You are not part of this group.";
+                    cout << "User is not part of this group...\n";
+                    string response = "You are not part of this group.\n";
                     send(socketFd, response.c_str(), response.length(), 0);
                 }
                 else
@@ -871,21 +796,125 @@ void *handleClientRequest(void *args)
                     groupInfo *group = groups[groupNumber];
                     if (group->getFileSha.find(fileName) == group->getFileSha.end())
                     {
-                        cout << "Requested file is not part of this group...\n\n";
-                        string response = "File not part of this group.";
+                        cout << "Requested file is not part of this group...\n";
+                        string response = "File not part of this group.\n";
                         send(socketFd, response.c_str(), response.length(), 0);
                     }
                     else
                     {
-                        cout << "Requested file is part of this group...\n\n";
+                        cout << "Requested file is part of this group...\n";
                         string fileSha = group->getFileSha[fileName];
-                        string filePath = group->getPath[fileSha];
 
                         // Send file path also here
+                        // string response = group->getPath[fileSha];
+                        // response += ':';
+                        // response += fileSha;
+                        // response += ':';
+
+                        // vector<tuple<string, vector<string>, int>> userChunksVec;
+
+                        // int index = 0;
+                        // for (const auto &chunkSha : torrent[fileSha])
+                        // {
+                        //     userChunksVec.push_back(make_tuple(chunkSha, userChunks[chunkSha], index));
+                        //     index++;
+                        // }
+
+                        // sort(userChunksVec.begin(), userChunksVec.end(), [](const tuple<string, vector<string>, int> &a, const tuple<string, vector<string>, int> &b)
+                        //      { return get<1>(a).size() < get<1>(b).size(); });
+
+                        // for (const auto &entry : userChunksVec)
+                        // {
+                        //     cout << "Chunk: " << get<0>(entry)
+                        //          << ", Users: " << get<1>(entry).size()
+                        //          << ", Original Index: " << get<2>(entry) << "\n";
+                        // }
+
+                        // // for (const auto &entry : userChunksVec)
+                        // // {
+                        // //     string chunkSha = get<0>(entry);
+                        // //     int chunkNumber = get<2>(entry);
+
+                        // //     if (chunkSha != "")
+                        // //     {
+                        // //         response += chunkSha;
+                        // //         response += ',';
+                        // //         response += to_string(chunkNumber);
+                        // //         response += ':';
+
+                        // //         for (const auto &user : get<1>(entry))
+                        // //         {
+                        // //             response += user;
+                        // //             response += ';';
+                        // //             response += userDetails[user]->ipaddress;
+                        // //             response += ';';
+                        // //             response += userDetails[user]->port;
+                        // //             response += '&';
+                        // //         }
+                        // //     }
+                        // // }
+                        // // send(socketFd, response.c_str(), response.length(), 0);
+
+                        // for (const auto &entry : userChunksVec)
+                        // {
+                        //     string chunkSha = get<0>(entry);
+                        //     int chunkNumber = get<2>(entry);
+
+                        //     if (!chunkSha.empty())
+                        //     {
+                        //         response += chunkSha;
+                        //         response += ',';
+                        //         response += to_string(chunkNumber);
+                        //         response += ':';
+
+                        //         unordered_set<string> uniqueUsers;
+
+                        //         for (const auto &user : get<1>(entry))
+                        //         {
+                        //             string userKey = user + ';' + userDetails[user]->ipaddress + ';' + userDetails[user]->port;
+
+                        //             if (uniqueUsers.find(userKey) == uniqueUsers.end())
+                        //             {
+                        //                 response += user;
+                        //                 response += ';';
+                        //                 response += userDetails[user]->ipaddress;
+                        //                 response += ';';
+                        //                 response += userDetails[user]->port;
+                        //                 response += '&';
+
+                        //                 uniqueUsers.insert(userKey);
+                        //             }
+                        //         }
+
+                        //         if (response.back() == '&')
+                        //         {
+                        //             response.pop_back();
+                        //         }
+
+                        //         response += ':';
+                        //     }
+                        // }
+                        // if (!response.empty() && response.back() == ':')
+                        // {
+                        //     response.pop_back();
+                        // }
+
+                        // send(socketFd, response.c_str(), response.length(), 0);
+
                         string response = group->getPath[fileSha];
                         response += ':';
                         response += fileSha;
                         response += ':';
+
+                        // vector<pair<string, vector<string>>> userChunksVec;
+
+                        // for (auto chunkSha : torrent[fileSha])
+                        // {
+                        //     userChunksVec.push_back({chunkSha, userChunks[chunkSha]});
+                        // }
+
+                        // sort(userChunksVec.begin(), userChunksVec.end(), [](const pair<string, vector<string>> &a, const pair<string, vector<string>> &b)
+                        //      { return a.second.size() < b.second.size(); });
 
                         vector<tuple<string, vector<string>, int>> userChunksVec;
 
@@ -893,15 +922,35 @@ void *handleClientRequest(void *args)
                         for (const auto &chunkSha : torrent[fileSha])
                         {
                             userChunksVec.push_back(make_tuple(chunkSha, userChunks[chunkSha], index));
-                            index++;
+                            ++index;
                         }
 
                         sort(userChunksVec.begin(), userChunksVec.end(), [](const tuple<string, vector<string>, int> &a, const tuple<string, vector<string>, int> &b)
                              { return get<1>(a).size() < get<1>(b).size(); });
 
-                        // for (const auto &entry : userChunksVec)
+                        for (const auto &entry : userChunksVec)
+                        {
+                            cout << "Chunk: " << get<0>(entry)
+                                 << ", Users: " << get<1>(entry).size()
+                                 << ", Original Index: " << get<2>(entry) << "\n";
+                        }
+
+                        // for (auto chunkSha : torrent[fileSha])
                         // {
-                        //     cout << "Chunk: " << get<0>(entry) << ", Original Index: " << get<2>(entry) << "\n";
+                        //     if (chunkSha != "")
+                        //     {
+                        //         response += chunkSha;
+                        //         response += ':';
+                        //         for (auto user : userChunks[chunkSha])
+                        //         {
+                        //             response += user;
+                        //             response += ';';
+                        //             response += userDetails[user]->ipaddress;
+                        //             response += ';';
+                        //             response += userDetails[user]->port;
+                        //             response += '&';
+                        //         }
+                        //     }
                         // }
 
                         for (const auto &entry : userChunksVec)
@@ -909,49 +958,39 @@ void *handleClientRequest(void *args)
                             string chunkSha = get<0>(entry);
                             int chunkNumber = get<2>(entry);
 
-                            if (!chunkSha.empty())
+                            if (chunkSha != "")
                             {
                                 response += chunkSha;
                                 response += ',';
                                 response += to_string(chunkNumber);
                                 response += ':';
 
-                                const auto &users = get<1>(entry);
-                                if (!users.empty())
+                                for (const auto &user : get<1>(entry))
                                 {
-                                    int randomIndex = rand() % users.size();
-                                    const string &selectedUser = users[randomIndex];
-
-                                    response += selectedUser;
+                                    response += user;
                                     response += ';';
-                                    response += userDetails[selectedUser]->ipaddress;
+                                    response += userDetails[user]->ipaddress;
                                     response += ';';
-                                    response += userDetails[selectedUser]->port;
+                                    response += userDetails[user]->port;
                                     response += '&';
                                 }
                             }
                         }
-
-                        // cout << response << "\n";
-
-                        // cout << "Response with merged chunk hashes = ";
-                        // cout << response.size() << "\n";
                         send(socketFd, response.c_str(), response.length(), 0);
 
                         // Receive status message
                         char status[BUFFER_SIZE];
-                        int valueRead = recv(socketFd, status, sizeof(status) - 1, 0);
-                        if (valueRead < 0)
+                        int valread = recv(socketFd, status, sizeof(status) - 1, 0);
+                        if (valread < 0)
                         {
-                            cout << "Error in receiving message...\n\n";
+                            cout << "Error in receiving message...\n";
                         }
 
-                        status[valueRead] = '\0';
+                        status[valread] = '\0';
                         cout << status << "\n";
                         if (strncmp(status, "Successful Download", strlen("Successful Download")) == 0)
                         {
                             currUser->filesOwned.insert(fileSha);
-                            currUser->filesDownloaded.insert({filePath, groupNumber});
                             if (torrent.find(fileSha) != torrent.end())
                             {
                                 for (const string &chunkSha : torrent[fileSha])
@@ -967,10 +1006,9 @@ void *handleClientRequest(void *args)
                             }
                             else
                             {
-                                cout << "File SHA not found in torrent map.\n\n";
+                                cout << "File SHA not found in torrent map.\n";
                             }
 
-                            // For debugging purpose
                             cout << "User Chunks Mapping:\n";
                             for (const auto &pair : userChunks)
                             {
@@ -990,7 +1028,7 @@ void *handleClientRequest(void *args)
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
+                cout << "Client is not logged in.\n";
                 string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
@@ -1002,78 +1040,41 @@ void *handleClientRequest(void *args)
         {
             if (commands.size() < 2)
             {
-                string response = "Invalid upload_file command.\n\n";
+                string response = "Invalid upload_file command.\n";
                 send(socketFd, response.c_str(), response.length(), 0);
                 continue;
             }
 
             int groupNumber = stoi(commands[1]);
 
-            if (currUser != NULL && currUser->active == true)
+            if (groups.find(groupNumber) == groups.end())
             {
-                if (groups.find(groupNumber) == groups.end())
-                {
-                    cout << "Invalid group number entered...\n\n";
-                    string response = "Invalid group number entered. Please retry...\n";
-                    send(socketFd, response.c_str(), response.length(), 0);
-                }
-                // Checks if user is part of the group
-                else if (currUser->groupId.find(groupNumber) == currUser->groupId.end())
-                {
-                    cout << "User is not part of this group...\n\n";
-                    string response = "You are not part of this group.\n";
-                    send(socketFd, response.c_str(), response.length(), 0);
-                }
-                else
-                {
-                    cout << "All files of group " << groupNumber << " were displayed.\n\n";
-                    string response = "Files list:\n";
-                    for (auto it : groups[groupNumber]->getFileSha)
-                    {
-                        response += it.first;
-                        response += "\n";
-                    }
-                    send(socketFd, response.c_str(), response.length(), 0);
-                }
+                cout << "Invalid group number entered...\n";
+                string response = "Invalid group number entered. Please retry...\n";
+                send(socketFd, response.c_str(), response.length(), 0);
+            }
+            // Checks if user is part of the group
+            else if (currUser->groupId.find(groupNumber) == currUser->groupId.end())
+            {
+                cout << "User is not part of this group...\n";
+                string response = "You are not part of this group.\n";
+                send(socketFd, response.c_str(), response.length(), 0);
             }
             else
             {
-                cout << "Client is not logged in.\n\n";
-                string response = "User is not logged in. Please log in and retry...\n";
-                send(socketFd, response.c_str(), response.length(), 0);
-            }
-        }
-        else if (commands[0] == "show_downloads")
-        {
-            if (currUser != NULL && currUser->active == true)
-            {
-                string response = "";
-                for (auto it : currUser->filesDownloaded)
+                cout << "All files of group " << groupNumber << " were displayed.\n";
+                string response = "Files list:\n";
+                for (auto it : groups[groupNumber]->getFileSha)
                 {
-                    response += "[D] ";
-                    response += to_string(it.second);
-                    response += " ";
                     response += it.first;
                     response += "\n";
                 }
-
-                if (response == "")
-                {
-                    response = "You have not downloaded any files...\n";
-                }
-                cout << "Displayed files downloaded by " << currUser->userId << "...\n\n";
-                send(socketFd, response.c_str(), response.length(), 0);
-            }
-            else
-            {
-                cout << "Client is not logged in.\n\n";
-                string response = "User is not logged in. Please log in and retry...\n";
                 send(socketFd, response.c_str(), response.length(), 0);
             }
         }
         else
         {
-            cout << "Wrong command entered...\n\n";
+            cout << "Wrong command entered...\n";
             string response = "Wrong command entered. Please check...\n";
             send(socketFd, response.c_str(), response.length(), 0);
         }
@@ -1106,7 +1107,7 @@ int main(int argc, char *argv[])
 {
     if (argc > 3)
     {
-        cout << "Please enter the command in this format: ./a.out <tracker_info.txt> <tracker_no>\n\n";
+        cout << "Please enter the command in this format: ./a.out <tracker_info.txt> <tracker_no>\n";
         return 1;
     }
 
@@ -1116,7 +1117,7 @@ int main(int argc, char *argv[])
     int inputFd = open(trackerInfoPath, O_RDWR);
     if (inputFd < 0)
     {
-        cout << "Error: Could not open " << trackerInfoPath << " file.\n\n";
+        cout << "Error: Could not open " << trackerInfoPath << " file.\n";
         return 1;
     }
 
@@ -1124,7 +1125,7 @@ int main(int argc, char *argv[])
     ssize_t inputSize = read(inputFd, trackerInfo, BUFFER_SIZE);
     if (inputSize == 0)
     {
-        cout << "Error: Could not read " << trackerInfoPath << " file.\n\n";
+        cout << "Error: Could not read " << trackerInfoPath << " file.\n";
         return 1;
     }
 
@@ -1143,7 +1144,7 @@ int main(int argc, char *argv[])
     int trackerSocketFd = socket(AF_INET, SOCK_STREAM, 0);
     if (trackerSocketFd == -1)
     {
-        cout << "An error occurred in creating socket.\n\n";
+        cout << "An error occurred in creating socket\n";
         return 1;
     }
 
@@ -1153,7 +1154,7 @@ int main(int argc, char *argv[])
     // Sock Optserver_fd
     if (setsockopt(trackerSocketFd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
     {
-        cout << "Error: Sockopt.\n\n";
+        cout << "Error: Sockopt\n";
         return 1;
     }
 
@@ -1168,7 +1169,7 @@ int main(int argc, char *argv[])
 
     if (bind(trackerSocketFd, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
-        cout << "Error: Could not bind to port " << trackerPort << ".\n\n";
+        cout << "Error: Could not bind to port " << trackerPort << ".\n";
         return 1;
     }
 
@@ -1181,14 +1182,14 @@ int main(int argc, char *argv[])
     else
     {
         cout << trackerPort << "\n";
-        cout << "Tracker listening on port " << trackerPort << "...\n\n";
+        cout << "Tracker listening on port " << trackerPort << "...\n";
     }
 
     // For getting inputs from user (quit case)
     pthread_t thread_id;
     if (pthread_create(&thread_id, NULL, handleInput, NULL) != 0)
     {
-        cout << "Failed to create thread.\n";
+        cout << "Failed to create thread" << endl;
         return 1;
     }
 
@@ -1218,7 +1219,7 @@ int main(int argc, char *argv[])
         pthread_t clientThreadId;
         if (pthread_create(&clientThreadId, NULL, handleClientRequest, (void *)threadArgs) != 0)
         {
-            cout << "Failed to create thread\n";
+            cout << "Failed to create thread" << endl;
             delete threadArgs;
         }
         else
